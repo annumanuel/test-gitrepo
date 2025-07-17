@@ -14,7 +14,8 @@ def main():
         print("CLI mode not implemented yet. Please run without arguments for GUI mode.")
         sys.exit(1)
     else:
-        # GUI mode (default)
+        # GUI mode (default) to new
+    
         root = tk.Tk()
         app = EVChargerSimulatorGUI(root)
         root.mainloop()
