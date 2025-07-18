@@ -7,6 +7,8 @@ import asyncio
 import threading
 import platform
 import sys
+import re
+from datetime import datetime
 
 # Import from other modules
 from ev_charger_simulator import EVChargerSimulator
@@ -24,6 +26,10 @@ class EVChargerSimulatorGUI:
         self.asyncio_thread = None
         self.loop = None
         self.config_keys = []
+        
+        # Enhanced logging
+        self.log_entries = []  # Store all log entries
+        self.filtered_log_entries = []  # Store filtered entries
         
         self.setup_ui()
         
@@ -148,6 +154,150 @@ class EVChargerSimulatorGUI:
         ttk.Label(charger_frame, text="Number of Connectors:").grid(row=4, column=0, sticky=tk.W, pady=2)
         self.num_connectors_var = tk.StringVar(value="1")
         ttk.Spinbox(charger_frame, textvariable=self.num_connectors_var, from_=1, to=10, width=10).grid(row=4, column=1, sticky=tk.W, pady=2)
+        
+        # Maximum power
+        ttk.Label(charger_frame, text="Max Power (W):").grid(row=5, column=0, sticky=tk.W, pady=2)
+        self.max_power_var = tk.StringVar(value="22000")  # Default 22kW
+        max_power_entry = ttk.Entry(charger_frame, textvariable=self.max_power_var, width=15)
+        max_power_entry.grid(row=5, column=1, sticky=tk.W, pady=2)
+        ttk.Label(charger_frame, text="(e.g., 7400 for 7.4kW, 22000 for 22kW)").grid(row=5, column=2, sticky=tk.W, pady=2, padx=(5, 0))
+
+    def setup_charging_profiles_tab(self, parent):
+        """Setup charging profiles tab"""
+        # Create main frame with padding
+        main_frame = ttk.Frame(parent, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Profile Settings Frame
+        profile_frame = ttk.LabelFrame(main_frame, text="Charging Profile Settings", padding=10)
+        profile_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Row 1: Profile ID and Connector
+        row1 = ttk.Frame(profile_frame)
+        row1.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(row1, text="Profile ID:").pack(side=tk.LEFT, padx=(0, 5))
+        self.profile_id_var = tk.StringVar(value="1")
+        ttk.Entry(row1, textvariable=self.profile_id_var, width=10).pack(side=tk.LEFT, padx=(0, 20))
+        
+        ttk.Label(row1, text="Connector ID:").pack(side=tk.LEFT, padx=(0, 5))
+        self.profile_connector_var = tk.StringVar(value="1")
+        ttk.Spinbox(row1, textvariable=self.profile_connector_var, from_=0, to=10, width=5).pack(side=tk.LEFT, padx=(0, 20))
+        
+        ttk.Label(row1, text="Stack Level:").pack(side=tk.LEFT, padx=(0, 5))
+        self.stack_level_var = tk.StringVar(value="0")
+        ttk.Spinbox(row1, textvariable=self.stack_level_var, from_=0, to=10, width=5).pack(side=tk.LEFT)
+        
+        # Row 2: Purpose and Kind
+        row2 = ttk.Frame(profile_frame)
+        row2.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(row2, text="Purpose:").pack(side=tk.LEFT, padx=(0, 5))
+        self.purpose_var = tk.StringVar(value="TxDefaultProfile")
+        purpose_combo = ttk.Combobox(row2, textvariable=self.purpose_var, width=20)
+        purpose_combo['values'] = ("ChargePointMaxProfile", "TxDefaultProfile", "TxProfile")
+        purpose_combo.pack(side=tk.LEFT, padx=(0, 20))
+        
+        ttk.Label(row2, text="Kind:").pack(side=tk.LEFT, padx=(0, 5))
+        self.kind_var = tk.StringVar(value="Absolute")
+        kind_combo = ttk.Combobox(row2, textvariable=self.kind_var, width=15)
+        kind_combo['values'] = ("Absolute", "Recurring", "Relative")
+        kind_combo.pack(side=tk.LEFT)
+        
+        # Row 3: Transaction ID (optional)
+        row3 = ttk.Frame(profile_frame)
+        row3.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(row3, text="Transaction ID (optional):").pack(side=tk.LEFT, padx=(0, 5))
+        self.profile_transaction_var = tk.StringVar(value="")
+        ttk.Entry(row3, textvariable=self.profile_transaction_var, width=15).pack(side=tk.LEFT)
+        
+        # Charging Schedule Frame
+        schedule_frame = ttk.LabelFrame(main_frame, text="Charging Schedule", padding=10)
+        schedule_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Row 1: Charging Rate Unit and Duration
+        sched_row1 = ttk.Frame(schedule_frame)
+        sched_row1.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(sched_row1, text="Charging Rate Unit:").pack(side=tk.LEFT, padx=(0, 5))
+        self.rate_unit_var = tk.StringVar(value="W")
+        unit_combo = ttk.Combobox(sched_row1, textvariable=self.rate_unit_var, width=5)
+        unit_combo['values'] = ("W", "A")
+        unit_combo.pack(side=tk.LEFT, padx=(0, 20))
+        
+        ttk.Label(sched_row1, text="Duration (seconds):").pack(side=tk.LEFT, padx=(0, 5))
+        self.duration_var = tk.StringVar(value="3600")
+        ttk.Entry(sched_row1, textvariable=self.duration_var, width=10).pack(side=tk.LEFT)
+        
+        # Schedule Periods Frame
+        periods_frame = ttk.LabelFrame(main_frame, text="Schedule Periods", padding=10)
+        periods_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Period 1
+        period1_frame = ttk.Frame(periods_frame)
+        period1_frame.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(period1_frame, text="Period 1 - Start (s):").pack(side=tk.LEFT, padx=(0, 5))
+        self.period1_start_var = tk.StringVar(value="0")
+        ttk.Entry(period1_frame, textvariable=self.period1_start_var, width=10).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(period1_frame, text="Limit:").pack(side=tk.LEFT, padx=(0, 5))
+        self.period1_limit_var = tk.StringVar(value="7400")
+        ttk.Entry(period1_frame, textvariable=self.period1_limit_var, width=10).pack(side=tk.LEFT, padx=(0, 5))
+        
+        ttk.Label(period1_frame, text="(W or A)").pack(side=tk.LEFT)
+        
+        # Period 2 (optional)
+        period2_frame = ttk.Frame(periods_frame)
+        period2_frame.pack(fill=tk.X, pady=2)
+        
+        self.use_period2_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(period2_frame, text="Use Period 2", variable=self.use_period2_var).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(period2_frame, text="Start (s):").pack(side=tk.LEFT, padx=(0, 5))
+        self.period2_start_var = tk.StringVar(value="1800")
+        ttk.Entry(period2_frame, textvariable=self.period2_start_var, width=10).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(period2_frame, text="Limit:").pack(side=tk.LEFT, padx=(0, 5))
+        self.period2_limit_var = tk.StringVar(value="3700")
+        ttk.Entry(period2_frame, textvariable=self.period2_limit_var, width=10).pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Period 3 (optional)
+        period3_frame = ttk.Frame(periods_frame)
+        period3_frame.pack(fill=tk.X, pady=2)
+        
+        self.use_period3_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(period3_frame, text="Use Period 3", variable=self.use_period3_var).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(period3_frame, text="Start (s):").pack(side=tk.LEFT, padx=(0, 5))
+        self.period3_start_var = tk.StringVar(value="3600")
+        ttk.Entry(period3_frame, textvariable=self.period3_start_var, width=10).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(period3_frame, text="Limit:").pack(side=tk.LEFT, padx=(0, 5))
+        self.period3_limit_var = tk.StringVar(value="11000")
+        ttk.Entry(period3_frame, textvariable=self.period3_limit_var, width=10).pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Control Buttons Frame
+        control_frame = ttk.Frame(main_frame)
+        control_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Button(control_frame, text="Send SetChargingProfile", 
+                  command=self.send_charging_profile).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(control_frame, text="Clear Charging Profile", 
+                  command=self.clear_charging_profile).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(control_frame, text="Get Composite Schedule", 
+                  command=self.get_composite_schedule).pack(side=tk.LEFT, padx=5)
+        
+        # Status Display
+        status_frame = ttk.LabelFrame(main_frame, text="Active Charging Profiles", padding=10)
+        status_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.profiles_text = tk.Text(status_frame, height=10, width=80)
+        self.profiles_text.pack(fill=tk.BOTH, expand=True)
+        self.profiles_text.config(state=tk.DISABLED)
 
     def manage_config_keys(self):
         """Open configuration keys management dialog"""
@@ -291,153 +441,99 @@ class EVChargerSimulatorGUI:
         self.active_transactions_text.config(state=tk.DISABLED)
 
     def setup_log_tab(self, parent):
-        """Setup log tab"""
+        """Setup enhanced log tab with search and table"""
         log_frame = ttk.Frame(parent)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Log text area
-        self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, width=100, height=30)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        # Search and filter frame
+        search_frame = ttk.Frame(log_frame)
+        search_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Clear button
-        ttk.Button(log_frame, text="Clear Logs", command=self.clear_logs).pack(pady=5)
-
-    def setup_charging_profiles_tab(self, parent):
-        """Setup charging profiles tab"""
-        # Create main frame with padding
-        main_frame = ttk.Frame(parent, padding=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Search bar
+        ttk.Label(search_frame, text="Search:").pack(side=tk.LEFT, padx=(0, 5))
+        self.search_var = tk.StringVar()
+        self.search_var.trace('w', self.filter_logs)
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
+        search_entry.pack(side=tk.LEFT, padx=(0, 10))
         
-        # Profile Settings Frame
-        profile_frame = ttk.LabelFrame(main_frame, text="Charging Profile Settings", padding=10)
-        profile_frame.pack(fill=tk.X, pady=(0, 10))
+        # Level filter
+        ttk.Label(search_frame, text="Level:").pack(side=tk.LEFT, padx=(0, 5))
+        self.level_filter_var = tk.StringVar(value="ALL")
+        level_combo = ttk.Combobox(search_frame, textvariable=self.level_filter_var, 
+                                  values=["ALL", "INFO", "WARNING", "ERROR"], width=10)
+        level_combo.pack(side=tk.LEFT, padx=(0, 10))
+        level_combo.bind('<<ComboboxSelected>>', lambda e: self.filter_logs())
         
-        # Row 1: Profile ID and Connector
-        row1 = ttk.Frame(profile_frame)
-        row1.pack(fill=tk.X, pady=2)
+        # Component filter
+        ttk.Label(search_frame, text="Component:").pack(side=tk.LEFT, padx=(0, 5))
+        self.component_filter_var = tk.StringVar(value="ALL")
+        self.component_combo = ttk.Combobox(search_frame, textvariable=self.component_filter_var, 
+                                           values=["ALL"], width=15)
+        self.component_combo.pack(side=tk.LEFT, padx=(0, 10))
+        self.component_combo.bind('<<ComboboxSelected>>', lambda e: self.filter_logs())
         
-        ttk.Label(row1, text="Profile ID:").pack(side=tk.LEFT, padx=(0, 5))
-        self.profile_id_var = tk.StringVar(value="1")
-        ttk.Entry(row1, textvariable=self.profile_id_var, width=10).pack(side=tk.LEFT, padx=(0, 20))
+        # Clear and export buttons
+        ttk.Button(search_frame, text="Clear Logs", command=self.clear_logs).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(search_frame, text="Export Logs", command=self.export_logs).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(search_frame, text="Auto-scroll", command=self.toggle_autoscroll).pack(side=tk.RIGHT, padx=(5, 0))
         
-        ttk.Label(row1, text="Connector ID:").pack(side=tk.LEFT, padx=(0, 5))
-        self.profile_connector_var = tk.StringVar(value="1")
-        ttk.Spinbox(row1, textvariable=self.profile_connector_var, from_=0, to=10, width=5).pack(side=tk.LEFT, padx=(0, 20))
+        # Status bar
+        status_frame = ttk.Frame(log_frame)
+        status_frame.pack(fill=tk.X, pady=(0, 5))
         
-        ttk.Label(row1, text="Stack Level:").pack(side=tk.LEFT, padx=(0, 5))
-        self.stack_level_var = tk.StringVar(value="0")
-        ttk.Spinbox(row1, textvariable=self.stack_level_var, from_=0, to=10, width=5).pack(side=tk.LEFT)
+        self.log_status_var = tk.StringVar(value="0 log entries")
+        ttk.Label(status_frame, textvariable=self.log_status_var).pack(side=tk.LEFT)
         
-        # Row 2: Purpose and Kind
-        row2 = ttk.Frame(profile_frame)
-        row2.pack(fill=tk.X, pady=2)
+        self.autoscroll_var = tk.BooleanVar(value=True)
+        self.autoscroll_status = ttk.Label(status_frame, text="Auto-scroll: ON", foreground="green")
+        self.autoscroll_status.pack(side=tk.RIGHT)
         
-        ttk.Label(row2, text="Purpose:").pack(side=tk.LEFT, padx=(0, 5))
-        self.purpose_var = tk.StringVar(value="TxDefaultProfile")
-        purpose_combo = ttk.Combobox(row2, textvariable=self.purpose_var, width=20)
-        purpose_combo['values'] = ("ChargePointMaxProfile", "TxDefaultProfile", "TxProfile")
-        purpose_combo.pack(side=tk.LEFT, padx=(0, 20))
+        # Create treeview for log table
+        tree_frame = ttk.Frame(log_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(row2, text="Kind:").pack(side=tk.LEFT, padx=(0, 5))
-        self.kind_var = tk.StringVar(value="Absolute")
-        kind_combo = ttk.Combobox(row2, textvariable=self.kind_var, width=15)
-        kind_combo['values'] = ("Absolute", "Recurring", "Relative")
-        kind_combo.pack(side=tk.LEFT)
+        # Scrollbars
+        v_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical")
+        h_scrollbar = ttk.Scrollbar(tree_frame, orient="horizontal")
         
-        # Row 3: Transaction ID (optional)
-        row3 = ttk.Frame(profile_frame)
-        row3.pack(fill=tk.X, pady=2)
+        # Treeview
+        self.log_tree = ttk.Treeview(tree_frame,
+                                    columns=('time', 'level', 'component', 'message'),
+                                    show='headings',
+                                    yscrollcommand=v_scrollbar.set,
+                                    xscrollcommand=h_scrollbar.set)
         
-        ttk.Label(row3, text="Transaction ID (optional):").pack(side=tk.LEFT, padx=(0, 5))
-        self.profile_transaction_var = tk.StringVar(value="")
-        ttk.Entry(row3, textvariable=self.profile_transaction_var, width=15).pack(side=tk.LEFT)
+        # Configure scrollbars
+        v_scrollbar.config(command=self.log_tree.yview)
+        h_scrollbar.config(command=self.log_tree.xview)
         
-        # Charging Schedule Frame
-        schedule_frame = ttk.LabelFrame(main_frame, text="Charging Schedule", padding=10)
-        schedule_frame.pack(fill=tk.X, pady=(0, 10))
+        # Configure columns
+        self.log_tree.heading('time', text='Timestamp')
+        self.log_tree.heading('level', text='Level')
+        self.log_tree.heading('component', text='Component')
+        self.log_tree.heading('message', text='Message')
         
-        # Row 1: Charging Rate Unit and Duration
-        sched_row1 = ttk.Frame(schedule_frame)
-        sched_row1.pack(fill=tk.X, pady=2)
+        # Set column widths
+        self.log_tree.column('time', width=120, minwidth=100)
+        self.log_tree.column('level', width=80, minwidth=60)
+        self.log_tree.column('component', width=150, minwidth=100)
+        self.log_tree.column('message', width=500, minwidth=200)
         
-        ttk.Label(sched_row1, text="Charging Rate Unit:").pack(side=tk.LEFT, padx=(0, 5))
-        self.rate_unit_var = tk.StringVar(value="W")
-        unit_combo = ttk.Combobox(sched_row1, textvariable=self.rate_unit_var, width=5)
-        unit_combo['values'] = ("W", "A")
-        unit_combo.pack(side=tk.LEFT, padx=(0, 20))
+        # Configure row colors based on log level
+        self.log_tree.tag_configure('INFO', background='white')
+        self.log_tree.tag_configure('WARNING', background='#fff3cd', foreground='#856404')
+        self.log_tree.tag_configure('ERROR', background='#f8d7da', foreground='#721c24')
         
-        ttk.Label(sched_row1, text="Duration (seconds):").pack(side=tk.LEFT, padx=(0, 5))
-        self.duration_var = tk.StringVar(value="3600")
-        ttk.Entry(sched_row1, textvariable=self.duration_var, width=10).pack(side=tk.LEFT)
+        # Pack treeview and scrollbars
+        self.log_tree.grid(row=0, column=0, sticky='nsew')
+        v_scrollbar.grid(row=0, column=1, sticky='ns')
+        h_scrollbar.grid(row=1, column=0, sticky='ew')
         
-        # Schedule Periods Frame
-        periods_frame = ttk.LabelFrame(main_frame, text="Schedule Periods", padding=10)
-        periods_frame.pack(fill=tk.X, pady=(0, 10))
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
         
-        # Period 1
-        period1_frame = ttk.Frame(periods_frame)
-        period1_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(period1_frame, text="Period 1 - Start (s):").pack(side=tk.LEFT, padx=(0, 5))
-        self.period1_start_var = tk.StringVar(value="0")
-        ttk.Entry(period1_frame, textvariable=self.period1_start_var, width=10).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(period1_frame, text="Limit:").pack(side=tk.LEFT, padx=(0, 5))
-        self.period1_limit_var = tk.StringVar(value="7400")
-        ttk.Entry(period1_frame, textvariable=self.period1_limit_var, width=10).pack(side=tk.LEFT, padx=(0, 5))
-        
-        ttk.Label(period1_frame, text="(W or A)").pack(side=tk.LEFT)
-        
-        # Period 2 (optional)
-        period2_frame = ttk.Frame(periods_frame)
-        period2_frame.pack(fill=tk.X, pady=2)
-        
-        self.use_period2_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(period2_frame, text="Use Period 2", variable=self.use_period2_var).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(period2_frame, text="Start (s):").pack(side=tk.LEFT, padx=(0, 5))
-        self.period2_start_var = tk.StringVar(value="1800")
-        ttk.Entry(period2_frame, textvariable=self.period2_start_var, width=10).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(period2_frame, text="Limit:").pack(side=tk.LEFT, padx=(0, 5))
-        self.period2_limit_var = tk.StringVar(value="3700")
-        ttk.Entry(period2_frame, textvariable=self.period2_limit_var, width=10).pack(side=tk.LEFT, padx=(0, 5))
-        
-        # Period 3 (optional)
-        period3_frame = ttk.Frame(periods_frame)
-        period3_frame.pack(fill=tk.X, pady=2)
-        
-        self.use_period3_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(period3_frame, text="Use Period 3", variable=self.use_period3_var).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(period3_frame, text="Start (s):").pack(side=tk.LEFT, padx=(0, 5))
-        self.period3_start_var = tk.StringVar(value="3600")
-        ttk.Entry(period3_frame, textvariable=self.period3_start_var, width=10).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(period3_frame, text="Limit:").pack(side=tk.LEFT, padx=(0, 5))
-        self.period3_limit_var = tk.StringVar(value="11000")
-        ttk.Entry(period3_frame, textvariable=self.period3_limit_var, width=10).pack(side=tk.LEFT, padx=(0, 5))
-        
-        # Control Buttons Frame
-        control_frame = ttk.Frame(main_frame)
-        control_frame.pack(fill=tk.X, pady=10)
-        
-        ttk.Button(control_frame, text="Send SetChargingProfile", 
-                  command=self.send_charging_profile).pack(side=tk.LEFT, padx=5)
-        
-        ttk.Button(control_frame, text="Clear Charging Profile", 
-                  command=self.clear_charging_profile).pack(side=tk.LEFT, padx=5)
-        
-        ttk.Button(control_frame, text="Get Composite Schedule", 
-                  command=self.get_composite_schedule).pack(side=tk.LEFT, padx=5)
-        
-        # Status Display
-        status_frame = ttk.LabelFrame(main_frame, text="Active Charging Profiles", padding=10)
-        status_frame.pack(fill=tk.BOTH, expand=True)
-        
-        self.profiles_text = tk.Text(status_frame, height=10, width=80)
-        self.profiles_text.pack(fill=tk.BOTH, expand=True)
-        self.profiles_text.config(state=tk.DISABLED)
+        # Bind double-click to show full message
+        self.log_tree.bind('<Double-1>', self.show_full_log_message)
 
     def browse_certificate(self):
         """Browse for CA certificate file"""
@@ -451,14 +547,194 @@ class EVChargerSimulatorGUI:
     def update_log(self, message):
         """Update log display (thread-safe)"""
         def _update():
-            self.log_text.insert(tk.END, message + "\n")
-            self.log_text.see(tk.END)
+            # Parse log message
+            log_entry = self.parse_log_message(message)
+            self.log_entries.append(log_entry)
+            
+            # Update component filter dropdown
+            self.update_component_filter()
+            
+            # Apply current filters
+            self.filter_logs()
+            
+            # Auto-scroll if enabled
+            if self.autoscroll_var.get():
+                children = self.log_tree.get_children()
+                if children:
+                    self.log_tree.see(children[-1])
         
         self.root.after(0, _update)
 
+    def parse_log_message(self, message):
+        """Parse log message into components"""
+        # Expected format: [HH:MM:SS] LEVEL: message
+        pattern = r'\[(\d{2}:\d{2}:\d{2})\]\s+(\w+):\s+(.*)'
+        match = re.match(pattern, message)
+        
+        if match:
+            time_str, level, msg = match.groups()
+            
+            # Extract component from message if possible
+            component = "Simulator"
+            if "ChargingProfiles" in msg or "Charging profile" in msg:
+                component = "ChargingProfiles"
+            elif "MeterValues" in msg or "Meter values" in msg:
+                component = "MeterValues"
+            elif "Configuration" in msg or "configuration" in msg:
+                component = "Configuration"
+            elif "Connection" in msg or "Connected" in msg or "Connecting" in msg:
+                component = "Connection"
+            elif "Transaction" in msg or "transaction" in msg:
+                component = "Transaction"
+            elif "Heartbeat" in msg:
+                component = "Heartbeat"
+            elif "BootNotification" in msg:
+                component = "BootNotification"
+            elif "Status" in msg or "status" in msg:
+                component = "StatusNotification"
+            elif "Reset" in msg:
+                component = "Reset"
+            
+            return {
+                'timestamp': time_str,
+                'level': level,
+                'component': component,
+                'message': msg,
+                'full_message': message
+            }
+        else:
+            # Fallback for unparsed messages
+            return {
+                'timestamp': datetime.now().strftime("%H:%M:%S"),
+                'level': 'INFO',
+                'component': 'Simulator',
+                'message': message,
+                'full_message': message
+            }
+
+    def filter_logs(self, *args):
+        """Filter logs based on search criteria"""
+        search_text = self.search_var.get().lower()
+        level_filter = self.level_filter_var.get()
+        component_filter = self.component_filter_var.get()
+        
+        # Clear current tree
+        for item in self.log_tree.get_children():
+            self.log_tree.delete(item)
+        
+        # Filter entries
+        self.filtered_log_entries = []
+        for entry in self.log_entries:
+            # Apply filters
+            if level_filter != "ALL" and entry['level'] != level_filter:
+                continue
+            if component_filter != "ALL" and entry['component'] != component_filter:
+                continue
+            if search_text and search_text not in entry['message'].lower():
+                continue
+            
+            self.filtered_log_entries.append(entry)
+            
+            # Add to tree
+            self.log_tree.insert('', 'end',
+                               values=(entry['timestamp'], entry['level'], 
+                                     entry['component'], entry['message']),
+                               tags=(entry['level'],))
+        
+        # Update status
+        total_entries = len(self.log_entries)
+        filtered_entries = len(self.filtered_log_entries)
+        self.log_status_var.set(f"{filtered_entries} of {total_entries} log entries")
+
+    def update_component_filter(self):
+        """Update component filter dropdown with available components"""
+        components = set(['ALL'])
+        for entry in self.log_entries:
+            components.add(entry['component'])
+        
+        self.component_combo['values'] = sorted(list(components))
+
+    def toggle_autoscroll(self):
+        """Toggle auto-scroll functionality"""
+        self.autoscroll_var.set(not self.autoscroll_var.get())
+        if self.autoscroll_var.get():
+            self.autoscroll_status.config(text="Auto-scroll: ON", foreground="green")
+        else:
+            self.autoscroll_status.config(text="Auto-scroll: OFF", foreground="red")
+
+    def show_full_log_message(self, event):
+        """Show full log message in a dialog"""
+        selection = self.log_tree.selection()
+        if not selection:
+            return
+        
+        item = self.log_tree.item(selection[0])
+        values = item['values']
+        
+        # Find the full entry
+        full_entry = None
+        for entry in self.filtered_log_entries:
+            if (entry['timestamp'] == values[0] and 
+                entry['level'] == values[1] and 
+                entry['component'] == values[2]):
+                full_entry = entry
+                break
+        
+        if full_entry:
+            # Create dialog
+            dialog = tk.Toplevel(self.root)
+            dialog.title("Full Log Message")
+            dialog.geometry("600x300")
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            # Message text
+            text_frame = ttk.Frame(dialog, padding=10)
+            text_frame.pack(fill=tk.BOTH, expand=True)
+            
+            text_widget = tk.Text(text_frame, wrap=tk.WORD, width=70, height=15)
+            scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+            text_widget.config(yscrollcommand=scrollbar.set)
+            
+            text_widget.insert(tk.END, full_entry['full_message'])
+            text_widget.config(state=tk.DISABLED)
+            
+            text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            # Close button
+            ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=10)
+
+    def export_logs(self):
+        """Export logs to a file"""
+        filename = filedialog.asksaveasfilename(
+            title="Export Logs",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        
+        if filename:
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    if filename.endswith('.csv'):
+                        f.write("Timestamp,Level,Component,Message\n")
+                        for entry in self.filtered_log_entries:
+                            f.write(f'"{entry["timestamp"]}","{entry["level"]}","{entry["component"]}","{entry["message"]}"\n')
+                    else:
+                        for entry in self.filtered_log_entries:
+                            f.write(f"{entry['full_message']}\n")
+                
+                messagebox.showinfo("Export Complete", f"Logs exported to {filename}")
+            except Exception as e:
+                messagebox.showerror("Export Error", f"Failed to export logs: {e}")
+
     def clear_logs(self):
-        """Clear log display"""
-        self.log_text.delete(1.0, tk.END)
+        """Clear all log entries"""
+        self.log_entries.clear()
+        self.filtered_log_entries.clear()
+        for item in self.log_tree.get_children():
+            self.log_tree.delete(item)
+        self.log_status_var.set("0 log entries")
 
     def apply_config(self):
         """Apply configuration to simulator"""
@@ -467,8 +743,13 @@ class EVChargerSimulatorGUI:
             if num_connectors < 1 or num_connectors > 10:
                 messagebox.showerror("Error", "Number of connectors must be between 1 and 10")
                 return
+                
+            max_power = int(self.max_power_var.get())
+            if max_power < 1000 or max_power > 1000000:  # 1kW to 1MW
+                messagebox.showerror("Error", "Max power must be between 1000W (1kW) and 1000000W (1MW)")
+                return
         except ValueError:
-            messagebox.showerror("Error", "Invalid number of connectors")
+            messagebox.showerror("Error", "Invalid number values")
             return
             
         config = {
@@ -484,6 +765,7 @@ class EVChargerSimulatorGUI:
             'firmware_version': self.firmware_var.get(),
             'meter_serial_number': f"METER{self.cp_id_var.get()}",
             'number_of_connectors': num_connectors,
+            'max_power': max_power,
             'configuration_keys': self.config_keys
         }
         
@@ -548,7 +830,8 @@ class EVChargerSimulatorGUI:
                 self.root.after(0, self.update_status_connected)
                 self.root.after(2000, self.periodic_transaction_update)
         except Exception as e:
-            self.simulator.log(f"Connection error: {e}", "ERROR")
+            if self.simulator:
+                self.simulator.log(f"Connection error: {e}", "ERROR")
         finally:
             self.root.after(0, self.on_disconnected)
     
@@ -644,38 +927,7 @@ class EVChargerSimulatorGUI:
                 messagebox.showerror("Error", "Invalid connector ID")
         else:
             messagebox.showwarning("Warning", "Not connected to Central System")
-    
-    def update_active_transactions(self):
-        """Update the active transactions display"""
-        if self.simulator:
-            active_transactions = self.simulator.get_active_transactions()
-            
-            self.active_transactions_text.config(state=tk.NORMAL)
-            self.active_transactions_text.delete(1.0, tk.END)
-            
-            if active_transactions:
-                for transaction in active_transactions:
-                    text = f"Connector {transaction['connector_id']}: Transaction {transaction['transaction_id']} - {transaction['status']}\n"
-                    self.active_transactions_text.insert(tk.END, text)
-            else:
-                self.active_transactions_text.insert(tk.END, "No active transactions")
-            
-            self.active_transactions_text.config(state=tk.DISABLED)
 
-    def wait_window(self, window):
-        """Wait for a window to be destroyed"""
-        window.wait_window()
-
-    def on_closing(self):
-        """Handle window closing"""
-        if self.simulator and self.simulator.is_connected:
-            self.disconnect_charger()
-        
-        if self.loop:
-            self.loop.call_soon_threadsafe(self.loop.stop)
-        
-        self.root.destroy()
-    
     def send_charging_profile(self):
         """Send SetChargingProfile message"""
         if not self.loop or not self.simulator or not self.simulator.is_connected:
@@ -732,7 +984,6 @@ class EVChargerSimulatorGUI:
             }
             
             # Send through simulator
-            from ocpp_enums import OCPPAction
             asyncio.run_coroutine_threadsafe(
                 self.simulator.send_call("SetChargingProfile", message),
                 self.loop
@@ -846,3 +1097,34 @@ class EVChargerSimulatorGUI:
             self.profiles_text.insert(tk.END, "No active charging profiles")
         
         self.profiles_text.config(state=tk.DISABLED)
+    
+    def update_active_transactions(self):
+        """Update the active transactions display"""
+        if self.simulator:
+            active_transactions = self.simulator.get_active_transactions()
+            
+            self.active_transactions_text.config(state=tk.NORMAL)
+            self.active_transactions_text.delete(1.0, tk.END)
+            
+            if active_transactions:
+                for transaction in active_transactions:
+                    text = f"Connector {transaction['connector_id']}: Transaction {transaction['transaction_id']} - {transaction['status']}\n"
+                    self.active_transactions_text.insert(tk.END, text)
+            else:
+                self.active_transactions_text.insert(tk.END, "No active transactions")
+            
+            self.active_transactions_text.config(state=tk.DISABLED)
+
+    def wait_window(self, window):
+        """Wait for a window to be destroyed"""
+        window.wait_window()
+
+    def on_closing(self):
+        """Handle window closing"""
+        if self.simulator and self.simulator.is_connected:
+            self.disconnect_charger()
+        
+        if self.loop:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        
+        self.root.destroy()

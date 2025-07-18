@@ -1,7 +1,7 @@
 # charging_profiles.py
 """OCPP 1.6 Charging Profiles Management"""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from enum import Enum
 import logging
@@ -185,7 +185,7 @@ class ChargingProfilesManager:
             return {
                 "status": "Accepted",
                 "connectorId": connector_id,
-                "scheduleStart": datetime.utcnow().isoformat() + "Z",
+                "scheduleStart": self.simulator.get_server_time().isoformat() + "Z",
                 "chargingSchedule": composite_schedule
             }
         else:
@@ -255,6 +255,7 @@ class ChargingProfilesManager:
     
     def _update_current_limits(self, connector_id: int):
         """Update current power/current limits based on active profiles"""
+        current_time = self.simulator.get_server_time()
         active_profiles = self._get_active_profiles(connector_id)
         
         if not active_profiles:
@@ -262,8 +263,6 @@ class ChargingProfilesManager:
             return
         
         # Get the highest priority profile (highest stack level)
-        current_time = datetime.utcnow()
-        
         for profile in active_profiles:
             # Find applicable schedule period
             applicable_period = self._get_applicable_period(profile, current_time)
@@ -299,7 +298,7 @@ class ChargingProfilesManager:
     
     def _get_active_profiles(self, connector_id: int) -> List[ChargingProfile]:
         """Get currently active profiles for a connector"""
-        current_time = datetime.utcnow()
+        current_time = self.simulator.get_server_time()
         active_profiles = []
         
         # Check connector-specific profiles
@@ -318,18 +317,45 @@ class ChargingProfilesManager:
         
         return active_profiles
     
-    def _is_profile_active(self, profile: ChargingProfile, current_time: datetime) -> bool:
+    def _is_profile_active(self, profile: ChargingProfile, current_time: datetime = None) -> bool:
         """Check if a profile is currently active"""
+        if current_time is None:
+            current_time = self.simulator.get_server_time()
+        
+        # Ensure current_time is timezone-aware
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=timezone.utc)
+        
         # Check valid_from
         if profile.valid_from:
-            valid_from = datetime.fromisoformat(profile.valid_from.replace('Z', '+00:00'))
-            if current_time < valid_from:
+            try:
+                if profile.valid_from.endswith('Z'):
+                    valid_from = datetime.fromisoformat(profile.valid_from.replace('Z', '+00:00'))
+                else:
+                    valid_from = datetime.fromisoformat(profile.valid_from)
+                    if valid_from.tzinfo is None:
+                        valid_from = valid_from.replace(tzinfo=timezone.utc)
+                
+                if current_time < valid_from:
+                    return False
+            except (ValueError, AttributeError) as e:
+                self.simulator.log(f"Invalid valid_from format: {profile.valid_from}: {e}", "WARNING")
                 return False
         
         # Check valid_to
         if profile.valid_to:
-            valid_to = datetime.fromisoformat(profile.valid_to.replace('Z', '+00:00'))
-            if current_time > valid_to:
+            try:
+                if profile.valid_to.endswith('Z'):
+                    valid_to = datetime.fromisoformat(profile.valid_to.replace('Z', '+00:00'))
+                else:
+                    valid_to = datetime.fromisoformat(profile.valid_to)
+                    if valid_to.tzinfo is None:
+                        valid_to = valid_to.replace(tzinfo=timezone.utc)
+                
+                if current_time > valid_to:
+                    return False
+            except (ValueError, AttributeError) as e:
+                self.simulator.log(f"Invalid valid_to format: {profile.valid_to}: {e}", "WARNING")
                 return False
         
         # Check if profile is for specific transaction
@@ -345,17 +371,31 @@ class ChargingProfilesManager:
         
         return True
     
-    def _get_applicable_period(self, profile: ChargingProfile, current_time: datetime) -> Optional[Dict[str, Any]]:
+    def _get_applicable_period(self, profile: ChargingProfile, current_time: datetime = None) -> Optional[Dict[str, Any]]:
         """Get the currently applicable charging schedule period"""
         if not profile.charging_schedule_periods:
             return None
         
+        if current_time is None:
+            current_time = self.simulator.get_server_time()
+        
+        # Ensure current_time is timezone-aware
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=timezone.utc)
+        
         # Calculate schedule start time
         if profile.start_schedule:
-            schedule_start = datetime.fromisoformat(profile.start_schedule.replace('Z', '+00:00'))
+            try:
+                if profile.start_schedule.endswith('Z'):
+                    schedule_start = datetime.fromisoformat(profile.start_schedule.replace('Z', '+00:00'))
+                else:
+                    schedule_start = datetime.fromisoformat(profile.start_schedule)
+                    if schedule_start.tzinfo is None:
+                        schedule_start = schedule_start.replace(tzinfo=timezone.utc)
+            except (ValueError, AttributeError):
+                schedule_start = current_time
         elif profile.charging_profile_kind == "Relative":
             # For relative profiles, start from transaction start
-            # This is simplified - in real implementation, you'd track transaction start times
             schedule_start = current_time
         else:
             schedule_start = current_time

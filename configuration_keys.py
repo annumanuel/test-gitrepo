@@ -16,9 +16,10 @@ class ConfigurationKey:
 class ConfigurationManager:
     """Manages OCPP 1.6 configuration keys"""
     
-    def __init__(self, heartbeat_interval: int = 60, number_of_connectors: int = 1):
+    def __init__(self, heartbeat_interval: int = 60, number_of_connectors: int = 1, max_power: int = 22000):
         self.heartbeat_interval = heartbeat_interval
         self.number_of_connectors = number_of_connectors
+        self.max_power = max_power
         self.configuration_keys: Dict[str, ConfigurationKey] = self._initialize_default_config_keys()
     
     def _initialize_default_config_keys(self) -> Dict[str, ConfigurationKey]:
@@ -68,6 +69,9 @@ class ConfigurationManager:
             "ChargingScheduleMaxPeriods": ConfigurationKey("ChargingScheduleMaxPeriods", True, "6"),
             "ConnectorSwitch3to1PhaseSupported": ConfigurationKey("ConnectorSwitch3to1PhaseSupported", True, "false"),
             "MaxChargingProfilesInstalled": ConfigurationKey("MaxChargingProfilesInstalled", True, "10"),
+            
+            # Custom configuration keys
+            "MaxChargingPower": ConfigurationKey("MaxChargingPower", True, str(self.max_power)),
         }
         
         return keys

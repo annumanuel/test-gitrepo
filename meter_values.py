@@ -19,15 +19,19 @@ class MeterValuesHandler:
         
     def initialize_connector(self, connector_id: int):
         """Initialize meter values for a connector"""
+        # Get max power from simulator or default to 22kW
+        max_power = getattr(self.simulator, 'max_power', 22000)
+        max_current = max_power / 230.0  # Assuming single phase 230V
+        
         self.meter_values[connector_id] = {
             "Energy.Active.Import.Register": 0,
-            "Power.Active.Import": 7400,  # Default 7.4 kW
-            "Current.Import": 32.0,  # Default 32A
+            "Power.Active.Import": max_power,  # Use charger's max power
+            "Current.Import": max_current,  # Calculate from max power
             "Voltage": 230.0,  # Default 230V
             "Temperature": 25.0,  # Default 25°C
             "SoC": 50,  # Default 50% State of Charge
-            "Power.Offered": 7400,  # Maximum power offered
-            "Current.Offered": 32.0,  # Maximum current offered
+            "Power.Offered": max_power,  # Maximum power offered
+            "Current.Offered": max_current,  # Maximum current offered
             "Energy.Reactive.Import.Register": 0,
             "Energy.Active.Export.Register": 0,
             "Energy.Reactive.Export.Register": 0,
@@ -176,15 +180,15 @@ class MeterValuesHandler:
         sampled_values = []
         meter_vals = self.meter_values.get(connector_id, {})
         
-        # Get current limits from charging profiles if available
+        # Get current limits from charging profile handler if available
         current_limits = {"power": None, "current": None}
-        if hasattr(self.simulator, 'charging_profiles_manager'):
-            current_limits = self.simulator.charging_profiles_manager.get_current_limit(connector_id)
+        if hasattr(self.simulator, 'charging_profile_handler'):
+            current_limits = self.simulator.charging_profile_handler.get_current_limit(connector_id)
         
         for measurand in measurands:
             if measurand == "Energy.Active.Import.Register":
                 # Calculate energy based on actual power consumption
-                actual_power = meter_vals.get("Power.Active.Import", 7400)
+                actual_power = meter_vals.get("Power.Active.Import", getattr(self.simulator, 'max_power', 22000))
                 if current_limits["power"] is not None:
                     actual_power = min(actual_power, current_limits["power"])
                 
@@ -203,7 +207,8 @@ class MeterValuesHandler:
                 })
             elif measurand == "Power.Active.Import":
                 # Apply power limit from charging profile
-                base_power = meter_vals.get("Power.Active.Import", 7400)
+                max_power = getattr(self.simulator, 'max_power', 22000)
+                base_power = meter_vals.get("Power.Active.Import", max_power)
                 
                 if current_limits["power"] is not None:
                     # Apply the charging profile limit
@@ -242,7 +247,8 @@ class MeterValuesHandler:
                 })
             elif measurand == "Current.Import":
                 # Apply current limit from charging profile
-                base_current = meter_vals.get("Current.Import", 32.0)
+                max_current = getattr(self.simulator, 'max_power', 22000) / 230.0
+                base_current = meter_vals.get("Current.Import", max_current)
                 
                 if current_limits["current"] is not None:
                     # Apply the charging profile limit
