@@ -92,43 +92,26 @@ class MessageHandlers:
         key = payload.get("key")
         value = payload.get("value")
         
-        if not key or value is None:
+        if not key:
             await self.simulator.send_call_result(message_id, {"status": "Rejected"})
             return
         
+        # Update configuration
         status = self.simulator.config_manager.update_configuration_key(key, value)
-        
         await self.simulator.send_call_result(message_id, {"status": status})
-        
-        if status == "Accepted":
-            self.simulator.log(f"Configuration key '{key}' updated to '{value}'")
-            
-            # Handle special cases for certain configuration keys
-            if key == "MeterValueSampleInterval":
-                self.simulator.log("MeterValueSampleInterval changed, meter value loops will use new interval on next cycle")
-            elif key == "MeterValuesSampledData":
-                self.simulator.log("MeterValuesSampledData changed, meter values will include new measurands on next cycle")
-            elif key == "HeartbeatInterval":
-                self.simulator.heartbeat_interval = self.simulator.config_manager.heartbeat_interval
-                self.simulator.log(f"HeartbeatInterval updated to {self.simulator.heartbeat_interval}")
-                
-        elif status == "RebootRequired":
-            self.simulator.log(f"Configuration key '{key}' updated to '{value}' (reboot required)")
-        elif status == "NotSupported":
-            self.simulator.log(f"Configuration key '{key}' not supported", "WARNING")
-        else:
-            self.simulator.log(f"Failed to update configuration key '{key}'", "WARNING")
     
     async def handle_clear_cache(self, message_id: str, payload: dict):
         """Handle ClearCache request"""
         self.simulator.log(f"ClearCache received: {payload}")
         await self.simulator.send_call_result(message_id, {"status": "Accepted"})
+        self.simulator.log("Authorization cache cleared")
     
     async def handle_trigger_message(self, message_id: str, payload: dict):
         """Handle TriggerMessage request"""
         self.simulator.log(f"TriggerMessage received: {payload}")
         
         requested_message = payload.get("requestedMessage")
+        connector_id = payload.get("connectorId", 1)
         
         if requested_message == "BootNotification":
             await self.simulator.send_call_result(message_id, {"status": "Accepted"})
@@ -146,24 +129,64 @@ class MessageHandlers:
         else:
             await self.simulator.send_call_result(message_id, {"status": "NotImplemented"})
     
+    async def handle_set_charging_profile(self, message_id: str, payload: dict):
+        """Handle SetChargingProfile request"""
+        self.simulator.log(f"SetChargingProfile received: {payload}")
+        
+        connector_id = payload.get("connectorId", 0)
+        cs_charging_profiles = payload.get("csChargingProfiles", {})
+        
+        if hasattr(self.simulator, 'charging_profiles_manager'):
+            status = self.simulator.charging_profiles_manager.handle_set_charging_profile(
+                connector_id, cs_charging_profiles
+            )
+        else:
+            status = "NotSupported"
+            self.simulator.log("Charging profiles manager not initialized", "ERROR")
+        
+        await self.simulator.send_call_result(message_id, {"status": status})
+    
+    async def handle_clear_charging_profile(self, message_id: str, payload: dict):
+        """Handle ClearChargingProfile request"""
+        self.simulator.log(f"ClearChargingProfile received: {payload}")
+        
+        if hasattr(self.simulator, 'charging_profiles_manager'):
+            status = self.simulator.charging_profiles_manager.handle_clear_charging_profile(payload)
+        else:
+            status = "Unknown"
+            self.simulator.log("Charging profiles manager not initialized", "ERROR")
+        
+        await self.simulator.send_call_result(message_id, {"status": status})
+    
+    async def handle_get_composite_schedule(self, message_id: str, payload: dict):
+        """Handle GetCompositeSchedule request"""
+        self.simulator.log(f"GetCompositeSchedule received: {payload}")
+        
+        connector_id = payload.get("connectorId", 0)
+        duration = payload.get("duration", 86400)  # Default 24 hours
+        charging_rate_unit = payload.get("chargingRateUnit")
+        
+        if hasattr(self.simulator, 'charging_profiles_manager'):
+            response = self.simulator.charging_profiles_manager.handle_get_composite_schedule(
+                connector_id, duration, charging_rate_unit
+            )
+        else:
+            response = {"status": "Rejected"}
+            self.simulator.log("Charging profiles manager not initialized", "ERROR")
+        
+        await self.simulator.send_call_result(message_id, response)
+    
     def get_handlers(self) -> Dict[str, Any]:
         """Get all message handlers"""
-        handlers = {
+        return {
             "Reset": self.handle_reset,
             "RemoteStartTransaction": self.handle_remote_start_transaction,
             "RemoteStopTransaction": self.handle_remote_stop_transaction,
             "GetConfiguration": self.handle_get_configuration,
             "ChangeConfiguration": self.handle_change_configuration,
             "ClearCache": self.handle_clear_cache,
-            "TriggerMessage": self.handle_trigger_message
+            "TriggerMessage": self.handle_trigger_message,
+            "SetChargingProfile": self.handle_set_charging_profile,
+            "ClearChargingProfile": self.handle_clear_charging_profile,
+            "GetCompositeSchedule": self.handle_get_composite_schedule
         }
-        
-        # Add charging profile handlers if available
-        if hasattr(self.simulator, 'charging_profile_handler'):
-            handlers.update({
-                "SetChargingProfile": self.simulator.charging_profile_handler.handle_set_charging_profile,
-                "ClearChargingProfile": self.simulator.charging_profile_handler.handle_clear_charging_profile,
-                "GetCompositeSchedule": self.simulator.charging_profile_handler.handle_get_composite_schedule
-            })
-        
-        return handlers
